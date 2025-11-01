@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------------
+  # 1. Frontend Web Service (Vue.js App)
+  # -------------------------------------------------------------------
+  web:
+    build:
+      context: ./web # Look for the Dockerfile in the 'web' directory
+    image: myapp-frontend:latest
+    ports:
+      # Maps host machine's port 80 (standard HTTP) to the container's port 8080 (Vue CLI default)
+      - "80:8080"
+    container_name: myapp_web
+    depends_on:
+      - api
+    restart: always
+
+  # -------------------------------------------------------------------
+  # 2. Backend API Service
+  # -------------------------------------------------------------------
+  api:
+    build:
+      context: ./api 
+    image: myapp-backend:latest
+    ports:
+]      - "8080:8080" 
+    container_name: myapp_api
+    depends_on:
+      - db
+    environment:
+      # NOTE: 'db' is the hostname in the Docker network
+      PGHOST: postgres
+      PGDATABASE: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    restart: always
+
+  # -------------------------------------------------------------------
+  # 3. Database Service (PostgreSQL)
+  # -------------------------------------------------------------------
+  postgres:
+    image: postgres:14-alpine
+    container_name: myapp_postgres
+    environment:
+      # Variables required by the Postgres image for initial setup
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      # Persist the database data to a named volume on the host machine
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    
+# Define the named volume for data persistence
+volumes:
+  db_data:
+    driver: local
