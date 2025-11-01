@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   # -------------------------------------------------------------------
   # 1. Frontend Web Service (Vue.js App)
@@ -5,7 +7,9 @@ services:
   web:
     build:
       context: ./web
-    image: myapp-frontend:latest
+      dockerfile: Dockerfile
+      args:
+        VUE_APP_API_URL: http://api:8080
     ports:
       - "80:8080"
     container_name: myapp_web
@@ -13,6 +17,9 @@ services:
       api:
         condition: service_healthy
     restart: always
+    networks:
+      - myapp_network
+
 
   # -------------------------------------------------------------------
   # 2. Backend API Service (Python/Flask)
@@ -20,6 +27,7 @@ services:
   api:
     build:
       context: ./api
+      dockerfile: Dockerfile
     image: myapp-backend:latest
     ports:
       - "5000:8080"
@@ -38,6 +46,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      - myapp_network
 
   # -------------------------------------------------------------------
   # 2b. Database Initialization Service
@@ -52,18 +62,21 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     command: >
-      sh -c 'until pg_isready -h postgres -U "$$POSTGRES_USER"; do
-               echo "Waiting for Postgres...";
-               sleep 2;
-             done &&
-             echo "Postgres is ready, creating table..." &&
-             PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" \
-               -c "CREATE TABLE IF NOT EXISTS votes (
-                     id VARCHAR(255) NOT NULL UNIQUE,
-                     vote VARCHAR(255) NOT NULL,
-                     created_at TIMESTAMP DEFAULT NULL
-                   );"'
+      sh -c '
+        until pg_isready -h postgres -U "$$POSTGRES_USER"; do
+          echo "Waiting for Postgres...";
+          sleep 2;
+        done &&
+        echo "Postgres is ready, creating table..." &&
+        PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" \
+          -c "CREATE TABLE IF NOT EXISTS votes (
+                id VARCHAR(255) PRIMARY KEY,
+                vote VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+              );"'
     restart: "no"
+    networks:
+      - myapp_network
 
   # -------------------------------------------------------------------
   # 3. Database Service (PostgreSQL)
@@ -84,7 +97,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - myapp_network
 
+# -------------------------------------------------------------------
+# Networks & Volumes
+# -------------------------------------------------------------------
 volumes:
   db_data:
     driver: local
+
+networks:
+  myapp_network:
+    driver: bridge
