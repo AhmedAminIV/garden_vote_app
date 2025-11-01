@@ -8,8 +8,8 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
-      args:
-        VUE_APP_API_URL: http://api:8080
+    environment:
+      VUE_APP_API_URL=api:8080
     ports:
       - "80:8080"
     container_name: myapp_web
