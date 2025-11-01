@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, make_response, g
+from flask import Flask, request
 from flask_cors import CORS
 import os
 import socket
@@ -6,89 +6,132 @@ import random
 import json
 import logging
 import psycopg2
-
-import sys
 import time
+import sys
 
+# -----------------------------
+# Logging Setup
+# -----------------------------
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
+# -----------------------------
+# Config (from environment)
+# -----------------------------
 option_a = os.getenv('OPTION_A', "Cats")
 option_b = os.getenv('OPTION_B', "Dogs")
-db_hostname = 'postgres'
-db_database = os.getenv('PGDATABASE')
-db_password = os.getenv('PGPASSWORD')
-db_user = os.getenv('PGUSER')
+
+db_hostname = os.getenv('PGHOST', 'postgres')
+db_database = os.getenv('PGDATABASE', 'postgres')
+db_password = os.getenv('PGPASSWORD', 'postgres')
+db_user = os.getenv('PGUSER', 'postgres')
+
 hostname = socket.gethostname()
 
 app = Flask(__name__)
 CORS(app)
 
-print("Starting API")
+print("🐍 Starting API Service...")
+print(f"Connecting to DB at host={db_hostname}, db={db_database}, user={db_user}")
 
+# -----------------------------
+# Helper: Wait for DB and init table
+# -----------------------------
+def init_db(retries=10, delay=3):
+    """Wait for Postgres and initialize the votes table."""
+    for attempt in range(retries):
+        try:
+            conn = psycopg2.connect(
+                host=db_hostname,
+                user=db_user,
+                password=db_password,
+                dbname=db_database
+            )
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS votes (
+                    id VARCHAR(255) PRIMARY KEY,
+                    vote VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+            """)
+            conn.commit()
+            cur.close()
+            conn.close()
+            print("✅ Database ready (votes table exists)")
+            return
+        except Exception as e:
+            print(f"⚠️ Database not ready yet ({e}) — retrying ({attempt+1}/{retries})...")
+            time.sleep(delay)
+    print("❌ Could not connect to database after several retries.")
+    sys.exit(1)
+
+# Initialize database when app starts
+init_db()
+
+# -----------------------------
+# Routes
+# -----------------------------
 @app.route("/health", methods=['GET'])
 def health():
-    return app.response_class(
-        status=200,
-    )
+    return ("", 200)
 
 @app.route("/api", methods=['GET'])
 def hello():
-    return app.response_class(
-        response="Hello, I am the api service",
-        status=200,
-    )
+    return ("Hello, I am the API service", 200)
 
 @app.route("/api/vote", methods=['GET'])
 def get_votes():
-    print("Getting votes")
-
-    conn = psycopg2.connect( host=db_hostname, user=db_user, password=db_password, dbname=db_database)
-    cur = conn.cursor()
-    cur.execute("SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote")
-    res = cur.fetchall()
-    cur.close()
-    conn.close()
-    
-    return app.response_class(
-        response=json.dumps(res),
-        status=200,
-        mimetype='application/json'
-    )
+    try:
+        conn = psycopg2.connect(host=db_hostname, user=db_user, password=db_password, dbname=db_database)
+        cur = conn.cursor()
+        cur.execute("SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote;")
+        res = cur.fetchall()
+        cur.close()
+        conn.close()
+        return app.response_class(
+            response=json.dumps(res),
+            status=200,
+            mimetype='application/json'
+        )
+    except Exception as e:
+        print("❌ Error fetching votes:", e)
+        return app.response_class(response=json.dumps({"error": str(e)}), status=500, mimetype='application/json')
 
 @app.route("/api/vote", methods=['POST'])
 def post_vote():
-    voter_id = hex(random.getrandbits(64))[2:-1]
-    vote = None
+    try:
+        voter_id = hex(random.getrandbits(64))[2:-1]
+        vote = request.form.get('vote')
 
-    if request.method == 'POST':
-        vote = request.form['vote']
-        data = json.dumps({'voter_id': voter_id, 'vote': vote})
-        print("received vote request for '%s' from voter id: '%s'" % (vote, voter_id))
-        sys.stdout.flush()
+        if not vote:
+            return app.response_class(
+                response=json.dumps({"error": "Missing vote parameter"}),
+                status=400,
+                mimetype='application/json'
+            )
 
-        conn = psycopg2.connect( host=db_hostname, user=db_user, password=db_password, dbname=db_database)
-        query = "INSERT INTO votes (id, vote, created_at) VALUES (%s, %s, NOW())"
-        queryParams = (voter_id, vote)
+        conn = psycopg2.connect(host=db_hostname, user=db_user, password=db_password, dbname=db_database)
         cur = conn.cursor()
-        cur.execute(query, queryParams)
+        cur.execute("INSERT INTO votes (id, vote, created_at) VALUES (%s, %s, NOW());", (voter_id, vote))
         conn.commit()
         cur.close()
         conn.close()
 
+        print(f"🗳️ Received vote '{vote}' from voter '{voter_id}'")
         return app.response_class(
-            response=json.dumps(data),
+            response=json.dumps({'voter_id': voter_id, 'vote': vote}),
             status=200,
             mimetype='application/json'
         )
-    else:
-        print("received invalid request")
-        sys.stdout.flush()
-        return app.response_class(
-            response=json.dumps({}),
-            status=404,
-            mimetype='application/json'
-        )
 
+    except Exception as e:
+        print("❌ Error inserting vote:", e)
+        return app.response_class(response=json.dumps({"error": str(e)}), status=500, mimetype='application/json')
+
+
+# -----------------------------
+# Main Entry
+# -----------------------------
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8080, debug=True, threaded=True)
