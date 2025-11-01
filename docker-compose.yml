@@ -32,9 +32,6 @@ services:
     ports:
       - "5000:8080"
     container_name: myapp_api
-    depends_on:
-      myapp_api_init:
-        condition: service_completed_successfully
     environment:
       PGHOST: postgres
       PGDATABASE: postgres
@@ -46,35 +43,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    networks:
-      - myapp_network
-
-  # -------------------------------------------------------------------
-  # 2b. Database Initialization Service
-  # -------------------------------------------------------------------
-  myapp_api_init:
-    image: postgres:14-alpine
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    command: >
-      sh -c '
-        until pg_isready -h postgres -U "$$POSTGRES_USER"; do
-          echo "Waiting for Postgres...";
-          sleep 2;
-        done &&
-        echo "Postgres is ready, creating table..." &&
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" \
-          -c "CREATE TABLE IF NOT EXISTS votes (
-                id VARCHAR(255) PRIMARY KEY,
-                vote VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
-              );"'
-    restart: "no"
     networks:
       - myapp_network
 
