@@ -1,40 +1,69 @@
-version: '3.8'
-
 services:
   # -------------------------------------------------------------------
   # 1. Frontend Web Service (Vue.js App)
   # -------------------------------------------------------------------
   web:
     build:
-      context: ./web # Look for the Dockerfile in the 'web' directory
+      context: ./web
     image: myapp-frontend:latest
     ports:
-      # Maps host machine's port 80 (standard HTTP) to the container's port 8080 (Vue CLI default)
       - "80:8080"
     container_name: myapp_web
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: always
 
   # -------------------------------------------------------------------
-  # 2. Backend API Service
+  # 2. Backend API Service (Python/Flask)
   # -------------------------------------------------------------------
   api:
     build:
-      context: ./api 
+      context: ./api
     image: myapp-backend:latest
     ports:
-]      - "8080:8080" 
+      - "5000:8080"
     container_name: myapp_api
     depends_on:
-      - db
+      myapp_api_init:
+        condition: service_completed_successfully
     environment:
-      # NOTE: 'db' is the hostname in the Docker network
       PGHOST: postgres
       PGDATABASE: postgres
       PGUSER: postgres
       PGPASSWORD: postgres
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # -------------------------------------------------------------------
+  # 2b. Database Initialization Service
+  # -------------------------------------------------------------------
+  myapp_api_init:
+    image: postgres:14-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    command: >
+      sh -c 'until pg_isready -h postgres -U "$$POSTGRES_USER"; do
+               echo "Waiting for Postgres...";
+               sleep 2;
+             done &&
+             echo "Postgres is ready, creating table..." &&
+             PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" \
+               -c "CREATE TABLE IF NOT EXISTS votes (
+                     id VARCHAR(255) NOT NULL UNIQUE,
+                     vote VARCHAR(255) NOT NULL,
+                     created_at TIMESTAMP DEFAULT NULL
+                   );"'
+    restart: "no"
 
   # -------------------------------------------------------------------
   # 3. Database Service (PostgreSQL)
@@ -43,16 +72,19 @@ services:
     image: postgres:14-alpine
     container_name: myapp_postgres
     environment:
-      # Variables required by the Postgres image for initial setup
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     volumes:
-      # Persist the database data to a named volume on the host machine
       - db_data:/var/lib/postgresql/data
     restart: unless-stopped
-    
-# Define the named volume for data persistence
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   db_data:
     driver: local
